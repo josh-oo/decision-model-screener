@@ -1,0 +1,14 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
+# everything in data/ is downloaded or built on the machine that runs it
+data/
+
+# HTTP cache written by the synergy-dataset package
+synergy_cache.sqlite
+
+# training runs: checkpoints, adapters, validation scores
+runs/

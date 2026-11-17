@@ -1,0 +1,8 @@
+requests
+python-dotenv
+numpy
+pandas
+rank-bm25
+tqdm
+ipykernel
+synergy-dataset==2.2  # the SYNERGY+ train/test split ships with the package

@@ -1,0 +1,4 @@
+# Training on the GPU server (notebooks/training/), on top of the base requirements.
+-r requirements.txt
+unsloth==2026.11.6     # FastDecisionModel / DecisionTrainer; pulls a matching torch, transformers, peft, unsloth_zoo
+nbconvert              # run the notebook headless
