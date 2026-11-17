@@ -1,10 +1,10 @@
-"""Turn data/processed/training/{reviews,records}.jsonl into Kev fine-tuning files (JSONL, one request per line).
+"""Turn data/processed/training/{reviews,records}.jsonl into training requests (JSONL, one request per line).
 
-  python scripts/build_kev_jsonl.py                         # selection criteria, record title + abstract
-  python scripts/build_kev_jsonl.py --review-fields criteria,title   # criteria are always required
+  python scripts/build_requests.py                           # selection criteria, record title + abstract
+  python scripts/build_requests.py --review-fields criteria,title   # criteria are always required
 
-Writes data/processed/training/kev/<name>/:
-  train.jsonl, val.jsonl, test_tar2019.jsonl, test_synergy.jsonl   Kev requests with a label per question
+Writes data/processed/training/requests/<name>/:
+  train.jsonl, val.jsonl, test_tar2019.jsonl, test_synergy.jsonl   requests with a label per question
   <same>.meta.jsonl                                                  review_id, record_id, label source; same line order
   config.json                                                        the options used
 
@@ -76,7 +76,7 @@ def main():
         ap.error("the selection criteria are always part of the review information: include 'criteria'")
     record_fields = args.record_fields.split(",")
     name = args.name or f"review-{'+'.join(review_fields)}__record-{'+'.join(record_fields)}__label-{args.label}"
-    out = DATA / "kev" / name
+    out = DATA / "requests" / name
     out.mkdir(parents=True, exist_ok=True)
 
     reviews = {r["review_id"]: r for r in map(json.loads, (DATA / "reviews.jsonl").open())}

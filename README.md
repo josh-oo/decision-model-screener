@@ -59,7 +59,7 @@ machine that runs it; nothing in `data/` is committed.
 
 ```bash
 python scripts/prepare_training_data.py   # downloads SYNERGY+ (1.5 GB), CLEF TAR files, PubMed abstracts
-python scripts/build_kev_jsonl.py         # Kev files: selection criteria (always) + record title/abstract
+python scripts/build_requests.py          # training requests: selection criteria (always) + record title/abstract
 ```
 
 | Split | Data |
@@ -69,7 +69,7 @@ python scripts/build_kev_jsonl.py         # Kev files: selection criteria (alway
 | test | CLEF TAR 2019 Intervention test reviews; SYNERGY+ test split |
 
 Outputs are in `data/processed/training/` (`reviews.jsonl`, `records.jsonl`, `summary.json`, and
-`kev/<config>/`). Details and label definitions are at the top of each script.
+`requests/<config>/`). Details and label definitions are at the top of each script.
 
 - **Abstracts:** SYNERGY+ ships abstracts only for open-access works. The rest are filled from PubMed
   (by PMID, then by DOI) and, for papers not in PubMed, the OpenAlex API. OpenAlex allows 1,000
@@ -87,7 +87,7 @@ Outputs are in `data/processed/training/` (`reviews.jsonl`, `records.jsonl`, `su
 
 [notebooks/training/train_decision_model.ipynb](notebooks/training/train_decision_model.ipynb) fine-tunes a
 decision model with [Unsloth](https://unsloth.ai/docs/basics/train-your-own-decision-model-with-unsloth)
-(default: Laya multilingual; Qwen3.5 as an option) on the Kev files above. It trains LoRA adapters only
+(default: Laya multilingual; Qwen3.5 as an option) on the request files above. It trains LoRA adapters only
 (Laya's decision head stays frozen; a Qwen model must train its new head), runs on **GPU 1 only**, checks train/val for shared reviews and papers before training,
 and evaluates on val every N steps (MAP, WSS@95%, TNR@95%, R@10% at both CLEF TAR label levels). Outputs go
 to `runs/<name>/` (not committed). Set `PILOT = True` for a short test run first.
