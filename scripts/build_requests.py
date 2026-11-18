@@ -12,7 +12,9 @@ Each request: state = {"review": {...}, "record": {...}}, one `noul` question "i
 instruction used in the Jev runs. Label = title/abstract decision where the source has one, else the
 decision after full text (`--label` changes this). The label source is written to the meta file.
 The selection criteria are always part of the review information; reviews without criteria are
-skipped and listed in config.json.
+skipped and listed in config.json. Train records without abstract are left out (count in config.json;
+--keep-no-abstract keeps them). Val and test keep every record; title-only records are scored on the title,
+so results stay comparable with earlier runs and published CLEF TAR numbers.
 """
 import argparse, json, random, re, sys
 from collections import Counter, defaultdict
@@ -68,6 +70,8 @@ def main():
                     help="optional: subsample train negatives per review to this ratio (val/test never subsampled)")
     ap.add_argument("--max-overlap", type=float, default=0.2,
                     help="drop train reviews sharing more than this fraction of a val/test review's records")
+    ap.add_argument("--keep-no-abstract", action="store_true",
+                    help="keep train records without abstract (title only); by default they are left out of train")
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--name", default=None)
     args = ap.parse_args()
@@ -110,6 +114,7 @@ def main():
 
     files = {"train": [], "val": [], "test_tar2019": [], "test_synergy": []}
     skipped_reviews, unlabeled, subsampled = [], 0, 0
+    no_abstract_dropped = 0  # train only; val/test keep them (scored on the title) so they stay comparable
     rng = random.Random(args.seed)
     for rid, rev in reviews.items():
         if rid in overlap_dropped:
@@ -124,6 +129,10 @@ def main():
             skipped_reviews.append(rid)
             continue
         recs = by_review[rid]
+        if target == "train" and not args.keep_no_abstract:
+            kept = [r for r in recs if r["abstract"]]
+            no_abstract_dropped += len(recs) - len(kept)
+            recs = kept
         if target == "train":
             kept = [r for r in recs if not paper_keys(r) & all_held_keys]
             if len(kept) < len(recs):
@@ -163,7 +172,8 @@ def main():
                   train_records_dropped_same_paper_as_val_test=sum(shared_with_held_out.values()),
                   train_records_dropped_by_review=dict(shared_with_held_out.most_common()),
                   skipped_reviews_missing_review_fields=skipped_reviews,
-                  records_without_requested_label=unlabeled, train_negatives_subsampled_away=subsampled,
+                  records_without_requested_label=unlabeled,
+                  train_records_without_abstract_left_out=no_abstract_dropped, train_negatives_subsampled_away=subsampled,
                   counts=counts)
     (out / "config.json").write_text(json.dumps(config, indent=2))
     print(json.dumps(config, indent=2))
