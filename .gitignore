@@ -12,3 +12,6 @@ synergy_cache.sqlite
 
 # training runs: checkpoints, adapters, validation scores
 runs/
+
+# compiled kernels written by Unsloth when the training notebook runs
+unsloth_compiled_cache/
