@@ -88,8 +88,14 @@ def fetch_pubmed(pmids, path=RAW / "pubmed.jsonl", batch=200):
         for i in range(0, len(todo), batch):
             chunk = todo[i:i + batch]
             for attempt in range(5):
-                r = requests.post("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
-                                  data={"db": "pubmed", "id": ",".join(chunk), "retmode": "xml"}, timeout=120)
+                try:
+                    r = requests.post("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+                                      data={"db": "pubmed", "id": ",".join(chunk), "retmode": "xml"}, timeout=120)
+                except requests.RequestException:  # dropped connection, timeout
+                    if attempt == 4:
+                        raise
+                    time.sleep(2 * (attempt + 1))
+                    continue
                 if r.ok:
                     break
                 time.sleep(2 * (attempt + 1))

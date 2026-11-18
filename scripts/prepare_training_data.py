@@ -174,13 +174,18 @@ def pubmed_by_doi(dois, path=RAW / "pubmed_by_doi.jsonl", batch=100):
     eutils = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 
     def post(endpoint, data):
+        err = None
         for attempt in range(5):
-            r = requests.post(eutils + endpoint, data={**data, **key}, timeout=120)
-            if r.ok:
-                time.sleep(pause)
-                return r
+            try:
+                r = requests.post(eutils + endpoint, data={**data, **key}, timeout=120)
+                if r.ok:
+                    time.sleep(pause)
+                    return r
+                err = f"{r.status_code} {r.text[:200]}"
+            except requests.RequestException as e:  # dropped connection, timeout, truncated response
+                err = repr(e)
             time.sleep(2 * (attempt + 1))
-        raise RuntimeError(f"NCBI {endpoint} failed: {r.status_code} {r.text[:200]}")
+        raise RuntimeError(f"NCBI {endpoint} failed: {err}")
 
     with path.open("a") as f:
         for i in range(0, len(todo), batch):
@@ -251,8 +256,14 @@ def fill_from_openalex(records, path=SYNERGY_RAW / "openalex_abstracts.jsonl", b
         for i in range(0, len(todo_ids), batch):
             chunk = todo_ids[i:i + batch]
             for attempt in range(4):
-                resp = requests.get("https://api.openalex.org/works", timeout=120,
-                                    params={**params, "filter": "openalex_id:" + "|".join(chunk)})
+                try:
+                    resp = requests.get("https://api.openalex.org/works", timeout=120,
+                                        params={**params, "filter": "openalex_id:" + "|".join(chunk)})
+                except requests.RequestException:  # dropped connection, timeout
+                    if attempt == 3:
+                        raise
+                    time.sleep(5 * (attempt + 1))
+                    continue
                 if resp.status_code != 429 and resp.status_code < 500:
                     break
                 if resp.status_code == 429 and int(resp.headers.get("x-ratelimit-remaining", 1)) <= 0:
