@@ -3,7 +3,7 @@
 Running record of the experiments: what was run, on which data, what came out, and what it means.
 Newest entry at the bottom. Numbers are computed from the response caches in `results/`.
 
-## Summary so far (2026-11-17)
+## Summary so far (2026-11-20)
 
 MAP, macro over reviews. "All 20" = full benchmark; "subset" = the 10 reviews with under 1,000
 records (3,637 records), used for cheap first tests. Abstract-level / content-level labels.
@@ -34,6 +34,9 @@ Main points:
    beat one question with a short review description (entries 6–8).
 5. **Weights per section cannot be tuned reliably on 10 reviews**; only "outcomes low or zero" is
    stable (entry 8).
+6. **A fine-tuned small decision model is far behind zero-shot Jev.** On the validation reviews, Laya
+   after 3 epochs on balanced SYNERGY+ data reaches MAP 24.2 vs Jev 55.1 (abstract level; entry 9). Jev scores
+   about the same on val as on test, so val is not harder for it.
 
 ## Common setup
 
@@ -449,6 +452,68 @@ Before the other 10 reviews were run, the rule "product without outcomes" was fi
   mechanism paper into its top 10.
 - Limits: patterns from 4 reviews; review-type false positives at the top are not more common for
   the split approach overall (19 vs 23 across all top places).
+
+## 9. Validation reviews: zero-shot Jev vs a fine-tuned decision model (2026-11)
+
+Notebook: [notebooks/training/jev_val_baseline.ipynb](notebooks/training/jev_val_baseline.ipynb); calls via
+[scripts/jev_on_requests.py](scripts/jev_on_requests.py). Cache:
+`results/requests__review-criteria__record-title+abstract__label-abstract_else_final__val/`. Training runs:
+[notebooks/training/train_decision_model.ipynb](notebooks/training/train_decision_model.ipynb), outputs in `runs/`
+(not committed).
+
+**Differs from the common setup:** the 17 CLEF TAR 2019 Intervention **training** reviews used as validation for
+training (27,870 records; without CD011571 and CD012164, which are test reviews, and CD008201, which has no
+criteria). Labels: abstract-level (17 reviews) and content-level (16 reviews). Every row uses the same records
+and the same request: `state.review` = the review's full-text selection criteria only (one string, outcomes
+included), `state.record` = title + abstract, the usual `include` question. Jev gets this request with the label
+removed; zero-shot. Jev ties broken by BM25, then record id; trained models by record id.
+
+0 failed calls. Cost $1.45 (34.5M input tokens).
+
+| | Labels | MAP | R@10% | WSS@95% | TNR@95% |
+|---|---|---|---|---|---|
+| Random order (mean of 50 shuffles) | abs | 6.5 | 9.8 | 8.0 | 13.5 |
+| BM25 (query = review title) | abs | 16.4 | 36.0 | 41.3 | 47.6 |
+| Laya, untrained (step 0) | abs | 7.5 | 19.0 | 13.0 | 18.5 |
+| Laya, 300 steps, all train data (pilot) | abs | 11.1 | 30.6 | 25.1 | 31.3 |
+| Laya, 3 epochs, balanced train data | abs | 24.2 | 50.2 | 47.0 | 54.3 |
+| **Jev zero-shot** | abs | **55.1** | **81.5** | **75.2** | **83.9** |
+| Random order | content | 4.7 | 10.2 | 12.0 | 17.4 |
+| BM25 | content | 16.8 | 44.0 | 50.1 | 56.4 |
+| Laya, untrained (step 0) | content | 5.8 | 22.7 | 19.9 | 25.2 |
+| Laya, 300 steps, all train data (pilot) | content | 9.0 | 36.1 | 32.9 | 38.7 |
+| Laya, 3 epochs, balanced train data | content | 25.0 | 58.1 | 55.2 | 61.6 |
+| **Jev zero-shot** | content | **59.5** | **95.4** | **85.1** | **92.8** |
+
+Laya = `convaiinnovations/laya-multilingual`, LoRA adapters only (r 16), pretrained decision head frozen, lr 2e-4
+cosine, trained on the SYNERGY+ train split (criteria + record title/abstract, label abstract-level where
+available, else final). Pilot: effective batch 32, 300 steps (9,600 requests, 4% of an epoch). Balanced: one
+random exclude per include per review (27,004 requests), effective batch 64, 3 epochs = 1,266 steps; the reported
+step is the best on val by abstract-level MAP (also the last), so slightly optimistic.
+
+Per-review difference to Jev (balanced Laya − Jev), 95% bootstrap CI over reviews:
+
+| Labels | ΔMAP | Better / worse | ΔWSS@95% | Better / worse |
+|---|---|---|---|---|
+| abs | −30.9 [−42.6, −18.4] | 2 / 15 | −28.1 [−38.2, −18.4] | 1 / 16 |
+| content | −34.5 [−49.3, −18.1] | 3 / 13 | −29.9 [−39.7, −19.8] | 1 / 15 |
+
+Balanced Laya vs BM25: +7.8 MAP abs (CI −1.7 to +16.7, 12 of 17 better), WSS@95% +5.8 (9 better / 8 worse).
+
+- **Val is not harder than test for Jev.** Jev reaches MAP 55.1 / 59.5 here and 57.9 / 60.7 on the test reviews
+  (entry 1, LGAR input; full-text criteria only were close to that on the test subset, entry 5). BM25 is lower on
+  val (16.4 vs 22.3) because the review titles are weaker queries there, and val has fewer includes (1.5% vs
+  2.2% pooled; 4 reviews with 1–5 includes), which lowers MAP for every ranker. Val numbers should therefore only
+  be compared within val.
+- **Untrained Laya cannot screen with this input** (step 0 ≈ random order); all of its ranking ability comes from
+  fine-tuning.
+- **The fine-tuned model is far behind zero-shot Jev** (−31 MAP, worse on 15 of 17 reviews) and only on par with
+  BM25 at the end of the ranking. Training loss falls at each epoch boundary and val loss rises from step 1000 to
+  1266, so more epochs on the balanced data are unlikely to close the gap.
+- **Reviews hard for both:** CD008170 (Jev 17.6), CD005139 (16.7), CD012930 (35.1); large reviews with many
+  includes. Candidates for label noise or criteria that cannot be judged from an abstract.
+- **Not separated yet:** balancing vs training length (the pilot and the balanced run differ in both and in batch
+  size).
 
 ## Open questions / next runs
 
