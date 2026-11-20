@@ -91,6 +91,8 @@ decision model with [Unsloth](https://unsloth.ai/docs/basics/train-your-own-deci
 (Laya's decision head stays frozen; a Qwen model must train its new head), runs on **GPU 1 only**, checks train/val for shared reviews and papers before training,
 and evaluates on val every N steps (MAP, WSS@95%, TNR@95%, R@10% at both CLEF TAR label levels). Outputs go
 to `runs/<name>/` (not committed). Set `PILOT = True` for a short test run first.
+The untrained model is evaluated first (step 0). `BALANCED = True` trains on one exclude per include
+(build those requests with `python scripts/build_requests.py --train-neg-per-pos 1`); val stays the same.
 
 ```bash
 pip install -r requirements-train.txt

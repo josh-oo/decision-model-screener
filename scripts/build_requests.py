@@ -2,6 +2,7 @@
 
   python scripts/build_requests.py                           # selection criteria, record title + abstract
   python scripts/build_requests.py --review-fields criteria,title   # criteria are always required
+  python scripts/build_requests.py --train-neg-per-pos 1     # balanced train (1 negative per include, per review)
 
 Writes data/processed/training/requests/<name>/:
   train.jsonl, val.jsonl, test_tar2019.jsonl, test_synergy.jsonl   requests with a label per question
@@ -80,6 +81,8 @@ def main():
         ap.error("the selection criteria are always part of the review information: include 'criteria'")
     record_fields = args.record_fields.split(",")
     name = args.name or f"review-{'+'.join(review_fields)}__record-{'+'.join(record_fields)}__label-{args.label}"
+    if args.train_neg_per_pos and not args.name:
+        name += f"__train-neg{args.train_neg_per_pos:g}"   # never overwrite the unbalanced requests
     out = DATA / "requests" / name
     out.mkdir(parents=True, exist_ok=True)
 
