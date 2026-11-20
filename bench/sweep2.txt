@@ -1,0 +1,6 @@
+RESULT {"engine": "vllm", "tag": "fp8", "model": "Qwen3.5-0.8B", "n": 5000, "max_num_seqs": 256, "max_batched": 8192, "eager": false, "sort": false, "prefix_caching": false, "quant": "fp8", "seconds": 26.9, "rec_per_s": 185.9, "tok_per_s": 197469}
+RESULT {"engine": "vllm", "tag": "base", "model": "Qwen3.5-4B__", "n": 5000, "max_num_seqs": 256, "max_batched": 16384, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 199.2, "rec_per_s": 25.1, "tok_per_s": 26669}
+RESULT {"engine": "vllm", "tag": "b8k", "model": "Qwen3.5-4B__", "n": 5000, "max_num_seqs": 256, "max_batched": 8192, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 188.2, "rec_per_s": 26.6, "tok_per_s": 28227}
+RESULT {"engine": "vllm", "tag": "s512b32k", "model": "Qwen3.5-4B__", "n": 5000, "max_num_seqs": 512, "max_batched": 32768, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 200.32, "rec_per_s": 25.0, "tok_per_s": 26519}
+RESULT {"engine": "vllm", "tag": "fp8", "model": "Qwen3.5-4B__", "n": 5000, "max_num_seqs": 256, "max_batched": 16384, "eager": false, "sort": false, "prefix_caching": false, "quant": "fp8", "seconds": 121.01, "rec_per_s": 41.3, "tok_per_s": 43900}
+DONE

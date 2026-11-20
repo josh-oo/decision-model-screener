@@ -1,0 +1,7 @@
+RESULT {"engine": "vllm", "tag": "08b-bf16-abs", "model": "Qwen3.5-0.8B", "n": 4555, "max_num_seqs": 256, "max_batched": 8192, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 34.19, "rec_per_s": 133.2, "tok_per_s": 146489}
+RESULT {"engine": "vllm", "tag": "4b-bf16-abs", "model": "Qwen3.5-4B__", "n": 4555, "max_num_seqs": 256, "max_batched": 8192, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 177.77, "rec_per_s": 25.6, "tok_per_s": 28177}
+RESULT {"engine": "vllm", "tag": "4b-fp8-abs", "model": "Qwen3.5-4B__", "n": 4555, "max_num_seqs": 256, "max_batched": 16384, "eager": false, "sort": false, "prefix_caching": false, "quant": "fp8", "seconds": 114.46, "rec_per_s": 39.8, "tok_per_s": 43763}
+RESULT {"engine": "vllm", "tag": "08b-bf16-title", "model": "Qwen3.5-0.8B", "n": 5000, "max_num_seqs": 256, "max_batched": 8192, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 26.18, "rec_per_s": 191.0, "tok_per_s": 136240}
+RESULT {"engine": "vllm", "tag": "4b-bf16-title", "model": "Qwen3.5-4B__", "n": 5000, "max_num_seqs": 256, "max_batched": 8192, "eager": false, "sort": false, "prefix_caching": false, "quant": null, "seconds": 127.17, "rec_per_s": 39.3, "tok_per_s": 28050}
+RESULT {"engine": "vllm", "tag": "4b-fp8-title", "model": "Qwen3.5-4B__", "n": 5000, "max_num_seqs": 256, "max_batched": 16384, "eager": false, "sort": false, "prefix_caching": false, "quant": "fp8", "seconds": 82.6, "rec_per_s": 60.5, "tok_per_s": 43185}
+DONE
