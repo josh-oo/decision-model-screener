@@ -37,6 +37,17 @@ Main points:
 6. **A fine-tuned small decision model is far behind zero-shot Jev.** On the validation reviews, Laya
    after 3 epochs on balanced SYNERGY+ data reaches MAP 24.2 vs Jev 55.1 (abstract level; entry 9). Jev scores
    about the same on val as on test, so val is not harder for it.
+7. **Fine-tuned Qwen3.5 decision models come close to Jev, but more train reviews do not help (entry 11).** 0.8B on
+   all 92 SYNERGY+ train reviews reaches MAP 54.4 abstract-level (Jev 55.1, 4B 60.4) and 49.4 content-level (Jev 59.5);
+   46 reviews give about the same. Training can collapse at the start (an earlier 0.8B run reached only 21.4), so
+   single runs are unreliable.
+8. **The fine-tuned 4B model reads the criteria (entry 12).** With another review's criteria or none, its MAP falls
+   from 60 to about 10 (random order 6.5), on every val review.
+9. **Single 0.8B checkpoints are noisy; compare means over seeds and steps (entry 13).** With warmup no run collapses,
+   but checkpoints still differ by about 4 MAP; averaging the scores of 3 seeds lifts MAP abs from 48 to 55.
+10. **Keep the train reviews that have only final labels (entry 14).** Without them every metric is worse.
+11. **Distillation from 4B helps the 0.8B model (entry 15):** +2.6 MAP at both label levels, +1 WSS@95%, and more
+    stable runs. The recipe for later runs is fixed in "Recipe for later decision-model runs".
 
 ## Common setup
 
@@ -515,6 +526,284 @@ Balanced Laya vs BM25: +7.8 MAP abs (CI −1.7 to +16.7, 12 of 17 better), WSS@9
 - **Not separated yet:** balancing vs training length (the pilot and the balanced run differ in both and in batch
   size).
 
+## 10. Fine-tuning Qwen3.5-4B as a decision model (2026-11, in progress)
+
+Notebook: [notebooks/training/train_qwen35_4b.ipynb](notebooks/training/train_qwen35_4b.ipynb). Outputs:
+`runs/Qwen3.5-4B__review-criteria__record-title+abstract__label-abstract_else_final__train-neg1/` (not committed).
+Same val records, requests and metrics as entry 9.
+
+`unsloth/Qwen3.5-4B` (revision `3764fa35…`) with a **new decision head**, trained together with LoRA adapters
+(r 16; backbone weights frozen). Balanced train requests as in entry 9 (27,004; 1 truncated at 8,192 tokens, 0 val
+inputs truncated), effective batch 64 (16 × 4 accumulation), lr 2e-4 cosine (head 1e-4), 10 epochs of 422 steps,
+validation at step 0 and after every epoch.
+
+### Step 0 (untrained head)
+
+| | Labels | MAP | R@10% | WSS@95% | TNR@95% |
+|---|---|---|---|---|---|
+| Random order (entry 9) | abs | 6.5 | 9.8 | 8.0 | 13.5 |
+| Qwen3.5-4B, step 0 | abs | 7.1 | 18.9 | 19.4 | 25.0 |
+| Random order (entry 9) | content | 4.7 | 10.2 | 12.0 | 17.4 |
+| Qwen3.5-4B, step 0 | content | 5.1 | 20.9 | 22.3 | 27.7 |
+
+- **Random level, as expected for a new head.** All scores lie between 0.486 and 0.501 (mean 0.494, SD 0.002);
+  mean score of includes 0.4943 vs excludes 0.4937. The small lead over random order on WSS/TNR is what a random
+  projection of the Qwen features happens to give; it carries no information, and it cannot show whether the
+  yes/no columns are the right way round (check after epoch 1: MAP clearly below random means swapped).
+- **Unlike Laya (entry 9), step 0 is no baseline here**: Laya's head was pretrained, Qwen's is not.
+- **One validation pass takes about 32 minutes** (27,870 records, eval batch 32, about 46 GB GPU memory), about
+  8.5× Laya's 225 s. This run used the PyTorch fallback for Qwen3.5's linear-attention layers
+  (`flash-linear-attention` and `causal-conv1d` not installed); 10 more evaluations would take about 5.3 hours
+  without training. The run is restarted with both packages installed; compare its evaluation time with these
+  32 minutes.
+
+## 11. Qwen3.5-0.8B: more training reviews, and an unstable start (2026-11-19)
+
+Notebook: [notebooks/training/review_count_curve_qwen35_0.8b.ipynb](notebooks/training/review_count_curve_qwen35_0.8b.ipynb);
+runs via [scripts/train_decision_model.py](scripts/train_decision_model.py), subsets via
+[scripts/subset_train.py](scripts/subset_train.py). Outputs: `runs/Qwen3.5-0.8B__…__k<k>-s<seed>__steps1266__sched4220/`
+(not committed). Same val records, requests and metrics as entries 9–10.
+
+**Question:** does the 0.8B decision model get better with more training reviews? The train set has only 92
+distinct criteria texts. **Only the number of train reviews changes**: 46 (a random subset, stratified by domain and
+review size; all requests of a chosen review kept) vs all 92. Everything else as in the earlier 0.8B notebook run:
+`unsloth/Qwen3.5-0.8B` (revision `23c69c53…`), new decision head + LoRA r 16, lr 2e-4 (head 1e-4), batch 64 × 1,
+seed 3407, balanced train requests, cosine schedule over 4,220 steps without warmup, stopped at step 1,266 (= 3
+epochs of the 92 reviews; 5.7 epochs of the 46). Val after steps 50, 100, 200, 422, 844, 1266; reported is the best
+step by abstract-level MAP (slightly optimistic, same rule for every run). About 2 h per run on one GPU.
+
+| | Labels | Best step (epoch) | MAP | R@10% | WSS@95% | TNR@95% |
+|---|---|---|---|---|---|---|
+| 0.8B, 46 reviews | abs | 422 (1.9) | 52.9 | 78.3 | 72.3 | 80.6 |
+| 0.8B, 92 reviews | abs | 422 (1.0) | 54.4 | 77.0 | 75.3 | 84.0 |
+| 0.8B, 92 reviews, earlier notebook run (failed start, see below) | abs | 1266 (3.0) | 21.4 | 49.2 | 55.7 | 63.1 |
+| Qwen3.5-4B (entry 10) | abs | 844 (2.0) | 60.4 | 84.9 | 76.8 | 85.8 |
+| Jev zero-shot (entry 9) | abs | – | 55.1 | 81.5 | 75.2 | 83.9 |
+| 0.8B, 46 reviews | content | 422 (1.9) | 54.2 | 85.1 | 78.5 | 86.0 |
+| 0.8B, 92 reviews | content | 422 (1.0) | 49.4 | 81.3 | 76.7 | 84.1 |
+| 0.8B, 92 reviews, earlier notebook run | content | 1266 (3.0) | 15.9 | 53.0 | 61.0 | 67.6 |
+| Qwen3.5-4B (entry 10) | content | 844 (2.0) | 59.5 | 91.1 | 82.1 | 89.8 |
+| Jev zero-shot (entry 9) | content | – | 59.5 | 95.4 | 85.1 | 92.8 |
+
+Abstract-level MAP at each evaluation (the score falls after the best step as the train set is memorised; train
+loss reaches about 0.04 for 46 reviews and 0.12 for 92 by step 1,266):
+
+| Step | 50 | 100 | 200 | 422 | 844 | 1266 |
+|---|---|---|---|---|---|---|
+| 46 reviews | 40.4 | 37.6 | 50.8 | **52.9** | 39.2 | 32.8 |
+| 92 reviews | 32.2 | 41.9 | 42.0 | **54.4** | 49.7 | 46.0 |
+
+Per-review differences at the best step, 95% bootstrap CI over val reviews, reviews better / worse:
+
+| Comparison | Labels | ΔMAP | ΔWSS@95% |
+|---|---|---|---|
+| 92 − 46 reviews | abs | +1.5 [−1.9, +5.3], 10 / 6 | +3.0 [−1.3, +8.4], 9 / 7 |
+| 92 − 46 reviews | content | −4.8 [−11.0, +1.0], 5 / 10 | −1.8 [−6.2, +1.7], 7 / 7 |
+| 92 reviews − Jev | abs | −0.7 [−10.0, +8.9], 7 / 9 | +0.1 [−4.2, +5.4], 8 / 8 |
+| 92 reviews − Jev | content | −10.1 [−21.7, +1.2], 6 / 9 | −8.4 [−16.9, −0.9], 4 / 11 |
+
+- **Doubling the train reviews from 46 to 92 gives no clear gain.** +1.5 MAP at abstract level (below the 3 MAP set
+  in advance as worth acting on; CI includes 0), −4.8 at content level. More reviews of this kind are not what limits
+  the 0.8B model. With 92 reviews the score falls more slowly after the peak (46.0 vs 32.8 at step 1,266), so more
+  data makes the result less dependent on when training stops, but the peak is no higher.
+- **Memorisation is not the main limit.** Both runs peak after 1–2 epochs and get worse afterwards; picking the best
+  step handles that. The peak itself is the limit: it ties zero-shot Jev at abstract level and is below it at content
+  level. A possible reason (not tested): with only 92 different criteria texts the model learns what includes
+  typically look like rather than how to apply the given criteria. Entry 12 rules this out for the 4B model; for
+  0.8B it is untested.
+- **The 0.8B model is about 6 MAP behind 4B, not 40.** The earlier result "0.8B peaks at 21.4" came from a failed
+  start.
+- **Caveats:** one subset and one training seed per number of reviews; the start can vary a lot between runs (below),
+  so a 1.5 MAP difference is within what a second seed could change. The best step lies somewhere between 200 and
+  844, but only 422 is evaluated there. The two label levels disagree in direction.
+
+### Why the earlier 0.8B run reached only 21 MAP: it collapsed at the start
+
+The earlier notebook run ([notebooks/training/train_qwen35_0.8b.ipynb](notebooks/training/train_qwen35_0.8b.ipynb),
+`runs/Qwen3.5-0.8B__…__train-neg1/`) and the fresh 92-review run have the same settings, data, package versions and
+seed; their losses are identical up to step 20. Then they part:
+
+| Step | 10 | 20 | 30 | 40 | 50 | 100 | 200 |
+|---|---|---|---|---|---|---|---|
+| Earlier run: train loss (grad norm) | 0.695 (0.03) | 0.692 (0.13) | 0.676 (0.51) | 0.676 (0.41) | **0.697 (0.09)** | 0.694 (0.04) | 0.692 (0.08) |
+| Fresh run: train loss (grad norm) | 0.695 (0.02) | 0.692 (0.22) | 0.665 (0.25) | 0.634 (1.52) | **0.540 (7.29)** | 0.444 (3.24) | 0.373 (1.56) |
+
+- Both start to learn at steps 30–40; the earlier run then falls back to loss 0.69, which on balanced data is the loss
+  of answering 50/50 for every record, with very small gradients. It stays there for about 300 steps (0.615 at step
+  410) and reaches only MAP 21.4 by step 1,266, although its train loss then falls (0.36 at step 1,210).
+- **Cause, as far as the logs show:** training is on a knife-edge at steps 30–50, and the small numerical
+  differences between two GPU runs in bf16 (not bit-for-bit reproducible) decide whether the model keeps learning or
+  collapses. Something left over in the long-lived notebook kernel cannot be fully ruled out. A likely trigger is the
+  full learning rate (2e-4) from step 1 with no warmup on a new head; not tested.
+- **Consequence:** one run of this setup can land anywhere between about 21 and 54 MAP. Reported 0.8B (and
+  probably 4B) numbers need either a warmup that prevents the collapse or several training seeds. Check the train
+  loss over the first 100 steps of every run: if it is back at 0.69, the run has collapsed.
+
+## 12. Does the trained decision model read the criteria? Qwen3.5-4B with changed criteria (2026-11-19)
+
+Notebook: [notebooks/training/criteria_test.ipynb](notebooks/training/criteria_test.ipynb); scores via
+[scripts/criteria_test.py](scripts/criteria_test.py), in `runs/Qwen3.5-4B__…__train-neg1/criteria_test/step-844/`
+(not committed). Same val records, requests and metrics as entries 9–11.
+
+The Qwen3.5-4B decision model at its best step (844; entry 10) scores the val records again with **only
+`state.review.criteria` changed**: *other review* = the criteria of another val review (random derangement, seed 0,
+no review keeps its own; `swap.json`), *no criteria* = empty string. Record, question and labels unchanged; metrics
+against each record's true labels for its own review. The reloaded checkpoint reproduces the scores saved during
+training (258 records of the 3 smallest reviews: Spearman 0.9999, max |Δp| 0.006). About 30 min per variant on one GPU.
+
+| | Labels | MAP | R@10% | WSS@95% | TNR@95% |
+|---|---|---|---|---|---|
+| Own criteria | abs | 60.4 | 84.9 | 76.8 | 85.8 |
+| Other review's criteria | abs | 9.8 | 16.0 | 26.3 | 32.6 |
+| No criteria | abs | 11.0 | 22.5 | 26.1 | 32.3 |
+| Random order (entry 9) | abs | 6.5 | 9.8 | 8.0 | 13.5 |
+| Own criteria | content | 59.5 | 91.1 | 82.1 | 89.8 |
+| Other review's criteria | content | 6.3 | 23.0 | 35.8 | 41.6 |
+| No criteria | content | 9.9 | 28.1 | 29.0 | 34.8 |
+| Random order (entry 9) | content | 4.7 | 10.2 | 12.0 | 17.4 |
+
+Per review, variant − own criteria (95% bootstrap CI, reviews better / worse): other review ΔMAP −50.6 [−60.8, −40.4]
+abs (0 / 17), −53.2 [−65.4, −40.2] content (0 / 16); no criteria −49.4 [−58.9, −38.7] abs (0 / 17), −49.6
+[−62.2, −36.2] content (1 / 15). Rank correlation (Spearman) of the scores with own vs changed criteria within a
+review: mean 0.24 for both variants (range −0.30 to 0.69).
+
+- **The 4B model reads the criteria.** Without fitting criteria, MAP falls from 60 to about 10, close to random order,
+  on every review, and the order of the records within a review changes almost completely. About 50 of its 60 MAP
+  depend on the criteria; what remains (WSS@95% about 26 vs 8 for random order) is a small generic signal that pushes
+  some obvious non-studies to the end.
+- **The scores behave sensibly.** Mean P(include) is 0.20 with own criteria, 0.01 with another review's criteria
+  (almost everything excluded) and 0.68 with no criteria (nothing to exclude on).
+- **The hypothesis of entry 11 does not hold for 4B:** the trained model does not just learn what includes look
+  like. Fine-tuning on the 92 SYNERGY+ reviews can teach criteria-reading.
+- **Not shown:** whether it applies the finer criteria within a topic (study design, comparator). The swapped criteria
+  are from unrelated topics, so the test shows at least that the criteria tell the model what the review is about.
+  A variant that changes one criterion and keeps the topic (e.g. remove the study-design sentence) would test that.
+  Also not shown: whether the 0.8B model reads them (its runs in entry 11 saved no weights).
+
+## 13. Qwen3.5-0.8B with warmup: three seeds, and where the noise comes from (2026-11-19)
+
+Runs via [scripts/train_decision_model.py](scripts/train_decision_model.py) and `runs/seeds-warmup.sh`; outputs
+`runs/Qwen3.5-0.8B__…__train-neg1__steps844__sched4220__warmup60__seed<1-3>/` (not committed, checkpoints saved).
+Same val records, requests and metrics as entries 9–12.
+
+Setup as the 92-review run of entry 11, with **a linear warmup over the first 60 steps** (against the collapse) and
+**three training seeds**, stopped at step 844 (2 epochs; cosine schedule still over 4,220 steps). Val after steps 100,
+200, 300, 422, 633, 844. From here on, runs are compared by the **mean over all eval steps and seeds**, not by the best
+step, because the best step is chosen on val and is noisy.
+
+| Run set (mean over 6 steps × 3 seeds) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| 0.8B, 92 reviews, warmup 60 | 46.6 | 42.7 | 71.2 | 75.6 |
+
+- **No collapse in any seed.** Train loss leaves 0.69 within the first 100 steps in all three.
+- **Single checkpoints are very noisy.** The best step differs per seed (MAP abs 52.7 at 844, 53.6 at 422, 51.5 at
+  300); the same seed moves by about 4 MAP between neighbouring eval steps, and seeds differ by about as much. Most of
+  the noise comes from val reviews with 1–5 includes (per-review SD about 14 MAP); seed and step contribute about
+  equally. A difference of under about 3 MAP between two single runs means nothing.
+- **Averaging the scores of several checkpoints helps a lot** (computed from the saved val scores, no new training):
+
+| Scores (P(include)) averaged over | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| nothing: single checkpoint (mean of 3 seeds × steps 422/633/844) | 48.2 | 44.2 | 70.9 | 75.8 |
+| steps 422/633/844 of one seed (mean over seeds) | 51.0 | 47.0 | 71.9 | 76.3 |
+| 3 seeds at step 844 | 55.1 | 52.8 | 72.2 | 77.1 |
+| 3 seeds × 3 steps | 54.4 | 52.8 | 72.1 | 76.0 |
+| Qwen3.5-4B, step 844 (entry 10) | 60.4 | 59.5 | 76.8 | 82.1 |
+
+  Averaging closes about half of the MAP gap to 4B, so much of the 0.8B's weakness is instability. WSS@95% hardly
+  moves: the hardest includes at the end of the ranking are not fixed by averaging.
+
+## 14. Do labels from full-text screening add noise? Train only on reviews with title/abstract labels (2026-11-20)
+
+Runs via `runs/labels-abstract.sh`; request set `…__train-neg1__labels-abstract` built with
+`scripts/subset_train.py --label-source abstract`; outputs `runs/Qwen3.5-0.8B__…__labels-abstract__steps844__…__seed<1-3>/`.
+
+50 of the 92 SYNERGY+ train reviews have only final (post-full-text) labels. For the title/abstract task these are
+partly wrong: about 5% of their final excludes were includes at the abstract stage (median per review 6.4%, max
+40.5%); about 1–2% of all train requests. **Only change: train on the 42 reviews with title/abstract labels**
+(17,198 requests), same steps (844) and recipe as entry 13, 3 seeds.
+
+| Run set (mean over 6 steps × 3 seeds) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| 92 reviews, all labels (entry 13) | **46.6** | **42.7** | **71.2** | **75.6** |
+| 42 reviews, title/abstract labels only | 45.7 | 40.0 | 69.2 | 72.2 |
+
+- **Leaving out the final-label reviews hurts on every metric**, most for content-level WSS@95% (−3.4). The seeds
+  vary much more (MAP abs per seed 40.3–50.6 vs 43.9–48.9), and the runs get worse after about 2 epochs (WSS@95 abs
+  65–66 at step 844).
+- **Keep all 92 reviews.** The variety of the 50 extra reviews is worth more than the noise of their labels.
+- **Caveats:** same steps means more epochs on the smaller set (3.1 vs 2.0 at step 844), and the domain mix differs
+  (42: Health 15, Social 19, Physical 6, Life 2; 92: Health 42, Social 23, Physical 16, Life 11).
+
+## 15. Distillation: Qwen3.5-4B teaches Qwen3.5-0.8B (2026-11-20)
+
+Runs via `runs/distill.sh`; teacher scores via [scripts/score_train.py](scripts/score_train.py) in
+`runs/Qwen3.5-4B__…__train-neg1/train_scores/` ; students `runs/Qwen3.5-0.8B__…__warmup60__kd-4b-w0.5__seed<1-3>/`.
+
+The 4B model of entry 10 (checkpoint 844, trained on all 92 train reviews) scores every train request once
+(about 25 min). The 0.8B student then trains on the soft target **0.5 × label + 0.5 × 4B P(include)**
+(`--soft-targets … --soft-weight 0.5`; with cross-entropy this is the same as 0.5 × label loss + 0.5 × teacher loss).
+**Only the target changes**; everything else as in entry 13 (warmup 60, 844 steps, 3 seeds). Only train reviews are
+scored, so val and test labels play no part.
+
+The teacher scored its own training records, so its scores could have been close to the labels. They were not:
+mean 4B P(include) 0.86 for includes, 0.16 for excludes, so the targets are genuinely soft (lowest possible train loss
+0.21; the students reach about 0.30).
+
+| Run set (mean over 6 steps × 3 seeds) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| **0.8B distilled from 4B** | **49.2** | **45.2** | **72.0** | **76.6** |
+| 0.8B, labels only (entry 13) | 46.6 | 42.7 | 71.2 | 75.6 |
+| 0.8B, 42 reviews (entry 14) | 45.7 | 40.0 | 69.2 | 72.2 |
+| Qwen3.5-4B teacher (step 844, one run) | 60.4 | 59.5 | 76.8 | 82.1 |
+
+Seed means of MAP abs: distilled 51.4 / 49.3 / 47.1 vs labels only 48.9 / 43.9 / 47.0.
+
+- **Distillation helps on every metric:** +2.6 MAP at both label levels, about +1 WSS@95%.
+- **It is more stable.** The weakest distilled seed is above the mean of the labels-only runs; from step 300 on no
+  distilled checkpoint falls below 46 MAP abs (labels only: down to 39).
+- **Still far from 4B:** about 11–14 MAP and 5 WSS@95%.
+- **Not yet separated:** how much comes from the 4B's knowledge and how much from softer targets alone (label
+  smoothing also stabilises training). Control: uniform targets of the same average softness, no teacher.
+
+### Why the scores move late in training
+
+Distilled students, mean of the 3 seeds per eval step:
+
+| Step (epoch) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| 100 (0.24) | 45.0 | 41.6 | 71.3 | 76.8 |
+| 200 (0.47) | 47.6 | 43.8 | 73.8 | 77.3 |
+| 300 (0.71) | 51.0 | 46.5 | 73.0 | 76.8 |
+| 422 (1.00) | 51.8 | 46.7 | 71.9 | 77.8 |
+| 633 (1.50) | 48.4 | 45.5 | 71.0 | 74.7 |
+| 844 (2.00) | 51.6 | 47.3 | 71.0 | 76.3 |
+
+MAP rises until about 1 epoch and then stays level with a dip at step 633 (all three seeds); WSS@95% abs peaks at
+step 200 and loses about 3 points. Three causes:
+
+1. **From the second epoch the model fits the train records themselves.** Train loss drops right at the epoch
+   boundary (about 0.35 before step 422, 0.30 after). That helps the top of the ranking little and costs the hardest
+   includes, which WSS@95% depends on. Entry 14 shows the same more strongly (3 epochs → WSS@95 abs 65).
+2. **The learning rate never decays.** The cosine schedule runs over 4,220 steps but training stops at 844, where the
+   learning rate is still 1.83e-4 (92% of the peak). Every checkpoint is a snapshot of weights that are still moving a
+   lot; hence the up-and-down from step to step instead of a settled end.
+3. **Val noise:** 17 reviews, several with 1–5 includes; about 4 MAP per step (entry 13).
+
+## Recipe for later decision-model runs (decided 2026-11-20)
+
+These are fixed for all later runs unless a run tests one of them:
+
+1. **Warmup** over the first 60 steps (entry 13; prevents the collapse of entry 11).
+2. **All 92 train reviews**, including those with only final labels (entry 14).
+3. **Distillation from Qwen3.5-4B**, target 0.5 × label + 0.5 × teacher score (entry 15).
+4. **Learning rate decays to zero at the last step** (`--schedule-steps` = `--max-steps`), and **training stops after
+   about 1–1.5 epochs** (422–633 steps of the 92 reviews). The last checkpoint is then the one to report, with no step
+   chosen on val (entry 15). Not yet run: the first run with this schedule also checks that it does not cost MAP.
+5. **Compare run sets by the mean over seeds (3) and eval steps**, never by one best checkpoint (entry 13). Save
+   checkpoints.
+6. Keep the val records, request set and metrics fixed so runs stay comparable.
+
 ## Open questions / next runs
 
 1. **Fix the split-questions notebook:** its saved tables compare against the one-question and
@@ -532,3 +821,20 @@ Balanced Laya vs BM25: +7.8 MAP abs (CI −1.7 to +16.7, 12 of 17 better), WSS@9
    84 RCT includes?
 7. Records without an abstract are ranked lower with the review abstract; a record-information
    experiment could address this.
+8. ~~Stable start for the decision models~~: done, warmup 60 steps prevents the collapse; seeds vary by about 4 MAP
+   (entry 13).
+9. **Does the trained model use the criteria?** Answered for 4B: yes (entry 12). Still open: the 0.8B model (needs
+   a retrained run with checkpoints saved), and whether finer criteria within a topic are applied (change one
+   criterion, keep the topic).
+10. Optional for entry 11: a second 46-review subset (k46-s2) to see how much the result depends on which reviews
+    were picked; the 12- and 23-review points only if more reviews ever show a gain.
+11. **Label-smoothing control for entry 15:** uniform soft targets (includes 0.93, excludes 0.08, the average of the
+    distillation targets), no teacher, 3 seeds. Shows how much of the distillation gain is the 4B's knowledge.
+12. **First run with the new recipe** (decaying learning rate, stop at about 1–1.5 epochs, distillation; see "Recipe
+    for later decision-model runs").
+13. **Better teachers:** teacher weight 1.0; or two 4B teachers trained on disjoint halves of the train reviews, each
+    scoring the half it never saw (more informative targets; about 4.5 h extra).
+14. **Weight averaging:** average the LoRA weights of several checkpoints of one run into one model, to get part of
+    the score-averaging gain of entry 13 without running several models.
+15. **Full text for the final-label reviews:** give the full text in the input where the label is the final decision,
+    so label and input match (entry 14). Needs open-access full texts; first check their coverage.
