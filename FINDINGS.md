@@ -3,7 +3,7 @@
 Running record of the experiments: what was run, on which data, what came out, and what it means.
 Newest entry at the bottom. Numbers are computed from the response caches in `results/`.
 
-## Summary so far (2026-11-20)
+## Summary so far (2026-11-21)
 
 MAP, macro over reviews. "All 20" = full benchmark; "subset" = the 10 reviews with under 1,000
 records (3,637 records), used for cheap first tests. Abstract-level / content-level labels.
@@ -48,6 +48,12 @@ Main points:
 10. **Keep the train reviews that have only final labels (entry 14).** Without them every metric is worse.
 11. **Distillation from 4B helps the 0.8B model (entry 15):** +2.6 MAP at both label levels, +1 WSS@95%, and more
     stable runs. The recipe for later runs is fixed in "Recipe for later decision-model runs".
+12. **The distillation gain is the 4B's knowledge, not softer targets (entry 16).** Constant soft targets of the same
+    average softness are no better than hard labels (MAP abs 44.9 vs 46.6).
+13. **Cochrane training data is the biggest gain so far (entry 17).** Adding 3,436 Cochrane reviews (included studies
+    vs PubMed similar articles) lifts the 0.8B model by +7.1 MAP abs, +12.2 MAP content and +5.1 WSS@95 content over
+    labels only; at step 844 it is within 2–3.5 MAP of the 4B model and level on content-level WSS@95%. Only
+    abstract-level WSS@95% gets worse (−3.3), likely because Cochrane labels are decisions after full text.
 
 ## Common setup
 
@@ -765,6 +771,7 @@ Seed means of MAP abs: distilled 51.4 / 49.3 / 47.1 vs labels only 48.9 / 43.9 /
 - **Still far from 4B:** about 11–14 MAP and 5 WSS@95%.
 - **Not yet separated:** how much comes from the 4B's knowledge and how much from softer targets alone (label
   smoothing also stabilises training). Control: uniform targets of the same average softness, no teacher.
+  Answered in entry 16: the 4B's knowledge.
 
 ### Why the scores move late in training
 
@@ -790,6 +797,90 @@ step 200 and loses about 3 points. Three causes:
    lot; hence the up-and-down from step to step instead of a settled end.
 3. **Val noise:** 17 reviews, several with 1–5 includes; about 4 MAP per step (entry 13).
 
+## 16. Label-smoothing control: soft targets without a teacher (2026-11-20)
+
+Runs via `runs/label-smoothing.sh`; outputs `runs/Qwen3.5-0.8B__…__warmup60__kd-const-w0.5__seed<1-3>/`.
+
+Tests whether the distillation gain of entry 15 comes from the 4B's per-record scores or only from softer targets.
+The "teacher" score of every record is replaced by the mean 4B score of its class (includes 0.864, excludes 0.163;
+`runs/label-smoothing.const_scores.jsonl`), mixed in with the same weight 0.5, so the targets are constant per class:
+**0.932 for includes, 0.081 for excludes**, the same average softness as in entry 15. This is class-wise label
+smoothing; Unsloth's own `label_smoothing` (off by default) is the symmetric uniform version and was not used.
+**Only the target changes**; everything else as in entries 13 and 15 (warmup 60, 844 steps, 3 seeds).
+
+| Run set (mean over 6 steps × 3 seeds) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| 0.8B distilled from 4B (entry 15) | **49.2** | **45.2** | **72.0** | **76.6** |
+| 0.8B, labels only (entry 13) | 46.6 | 42.7 | 71.2 | 75.6 |
+| 0.8B, label smoothing (constant targets) | 44.9 | 41.7 | 71.2 | 75.6 |
+
+Seed means of MAP abs: label smoothing 47.1 / 41.8 / 45.7 vs labels only 48.9 / 43.9 / 47.0.
+
+- **Softer targets alone do not help;** label smoothing is level with or below hard labels on every metric. The
+  distillation gain comes from the 4B's per-record information.
+- **Label smoothing is not more stable either:** its start is slower (MAP abs 33.8 at step 100 vs 42.6) and its
+  worst checkpoint is lower (21.6 vs 34.9).
+- **So better teachers are worth trying** (open question 13).
+
+## 17. Cochrane training data: 3,436 more reviews (2026-11-21)
+
+Request set built with [scripts/add_cochrane_requests.py](scripts/add_cochrane_requests.py) from
+`data/processed/cochrane/train_neg1/` (not committed); runs via `runs/cochrane.sh`; outputs
+`runs/Qwen3.5-0.8B__…__train-neg1__plus-cochrane-train_neg1__steps844__sched4220__warmup60__seed<1-3>/`.
+
+**Training data:** the 92 SYNERGY+ train reviews (27,004 requests) plus **3,436 Cochrane reviews with 122,994
+requests**: 61,748 included studies of the review (label 1) and 61,246 PubMed similar articles of them (label 0,
+about one per include). Together 149,998 requests, 82% from Cochrane. Review information = the Cochrane criteria (4
+sections: studies, participants, interventions, outcomes), rendered like the SYNERGY+ criteria; record = title +
+abstract (all Cochrane records have an abstract). The Cochrane build removes all CLEF TAR reviews and every paper of
+a val/test record; the training script checks the paper overlap with val again (0 reviews, 0 titles, 0 papers).
+
+Differences in the data, worth keeping in mind:
+- **Cochrane labels are final decisions** (included study after full text), not title/abstract decisions.
+- **The negatives are not screened records** but PubMed similar articles: related, but a different distribution
+  from the excludes of a real search.
+- **Longer inputs:** median criteria 2,825 characters (SYNERGY+ 913, CLEF val 2,404), abstracts about 1,700 (SYNERGY+
+  about 1,500). Hence micro-batch 16 × 4 accumulation; the effective batch stays 64.
+
+**Only the training data changes**; everything else as in entry 13 (warmup 60, 844 steps, cosine over 4,220 steps,
+3 seeds). 844 steps are 0.36 epochs of the combined set, so most Cochrane records are never seen. One seed takes
+about 1.5 h.
+
+| Run set (mean over 6 steps × 3 seeds) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| **0.8B, SYNERGY+ and Cochrane** | **53.7** | **54.9** | 67.9 | **80.7** |
+| 0.8B distilled from 4B (entry 15) | 49.2 | 45.2 | **72.0** | 76.6 |
+| 0.8B, labels only (entry 13) | 46.6 | 42.7 | 71.2 | 75.6 |
+| Qwen3.5-4B (step 844, one run; entry 10) | 60.4 | 59.5 | 76.8 | 82.1 |
+
+Seed means of MAP abs: Cochrane 53.6 / 54.3 / 53.2 vs labels only 48.9 / 43.9 / 47.0. Every Cochrane seed beats
+every labels-only seed on MAP (both label levels) and on content-level WSS@95%.
+
+Mean of the 3 seeds per eval step:
+
+| Step (epoch) | MAP abs | MAP content | WSS@95 abs | WSS@95 content |
+|---|---|---|---|---|
+| 100 (0.04) | 46.9 | 47.5 | 68.1 | 78.8 |
+| 200 (0.09) | 50.3 | 52.4 | 68.9 | 79.4 |
+| 300 (0.13) | 53.6 | 55.1 | 58.1 | 78.0 |
+| 422 (0.18) | 56.0 | 57.5 | 66.9 | 81.3 |
+| 633 (0.27) | 58.5 | 59.3 | 74.9 | 84.5 |
+| 844 (0.36) | 57.0 | 57.5 | 70.5 | 82.5 |
+
+- **Large gain on MAP, most at the content level:** +7.1 MAP abs, +12.2 MAP content, +5.1 WSS@95 content over
+  labels only. The seeds agree closely (MAP abs 53.2–54.3), so the 0.8B model is also more stable.
+- **Close to 4B at the end:** at steps 633–844, MAP 57.0–59.3 (4B: 60.4 / 59.5) and content-level WSS@95% 82.5–84.5
+  (4B: 82.1). MAP is still rising or level at step 844; the run has seen a third of the data once.
+- **Abstract-level WSS@95% is worse** (−3.3) and jumps between steps (single checkpoints down to 48.1 and 57.6; step
+  300 mean 58.1). Likely cause: Cochrane labels are final decisions, so the model learns to rank records that pass
+  abstract screening but fail on full text low; at the abstract level these count as includes and become the
+  hardest ones at the end of the ranking. Not tested yet.
+- **Caveats:** 0.36 epochs with a learning rate still at about 92% of the peak (the old schedule); content-level labels
+  match Cochrane's final-decision labels better, which may favour the content level.
+
+Follow-up running: the same data for 1 epoch (2,344 steps) with the learning rate decaying to 0 (`runs/cochrane-1ep.sh`,
+eval at 200, 422, 844, 1266, 1758, 2344; about 4 h per seed).
+
 ## Recipe for later decision-model runs (decided 2026-11-20)
 
 These are fixed for all later runs unless a run tests one of them:
@@ -802,6 +893,10 @@ These are fixed for all later runs unless a run tests one of them:
    chosen on val (entry 15). Not yet run: the first run with this schedule also checks that it does not cost MAP.
 5. **Compare run sets by the mean over seeds (3) and eval steps**, never by one best checkpoint (entry 13). Save
    checkpoints.
+
+Update 2026-11-21: adding the Cochrane training data (entry 17) helps more than any of the above; whether it becomes
+part of the recipe, and the right number of steps with it, depends on the 1-epoch run with decaying learning rate.
+Steps in point 4 refer to the 92 reviews alone; with Cochrane one epoch is 2,344 steps.
 6. Keep the val records, request set and metrics fixed so runs stay comparable.
 
 ## Open questions / next runs
@@ -828,8 +923,7 @@ These are fixed for all later runs unless a run tests one of them:
    criterion, keep the topic).
 10. Optional for entry 11: a second 46-review subset (k46-s2) to see how much the result depends on which reviews
     were picked; the 12- and 23-review points only if more reviews ever show a gain.
-11. **Label-smoothing control for entry 15:** uniform soft targets (includes 0.93, excludes 0.08, the average of the
-    distillation targets), no teacher, 3 seeds. Shows how much of the distillation gain is the 4B's knowledge.
+11. ~~Label-smoothing control for entry 15~~: done, softer targets alone do not help (entry 16).
 12. **First run with the new recipe** (decaying learning rate, stop at about 1–1.5 epochs, distillation; see "Recipe
     for later decision-model runs").
 13. **Better teachers:** teacher weight 1.0; or two 4B teachers trained on disjoint halves of the train reviews, each
@@ -838,3 +932,10 @@ These are fixed for all later runs unless a run tests one of them:
     the score-averaging gain of entry 13 without running several models.
 15. **Full text for the final-label reviews:** give the full text in the input where the label is the final decision,
     so label and input match (entry 14). Needs open-access full texts; first check their coverage.
+16. **Cochrane for longer, learning rate decaying to 0:** 1 epoch (2,344 steps), 3 seeds. Running
+    (`runs/cochrane-1ep.sh`, started 2026-11-21 02:19).
+17. **Cochrane + distillation:** the 4B scores the Cochrane records too, and the student trains on the soft targets.
+    The abstract-level 4B scores may also fix the weaker abstract-level WSS@95% of entry 17.
+18. **Why abstract-level WSS@95% drops with Cochrane:** check which val includes end up at the bottom of the ranking,
+    and whether they are abstract-level includes that are final excludes.
+19. **4B with Cochrane:** if the 0.8B gain holds, the 4B model (and the teacher) may gain as well.
