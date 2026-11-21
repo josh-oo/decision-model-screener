@@ -88,11 +88,18 @@ build_config = json.loads((REQ_DIR / "config.json").read_text())
 train_rows, train_meta = read_jsonl(REQ_DIR / "train.jsonl"), read_jsonl(REQ_DIR / "train.meta.jsonl")
 val_rows, val_meta = read_jsonl(REQ_DIR / "val.jsonl"), read_jsonl(REQ_DIR / "val.meta.jsonl")
 reviews = {r["review_id"]: r for r in read_jsonl(DATA / "reviews.jsonl")}
+data_dirs = [DATA] + [ROOT / d for d in build_config.get("extra_train_data", [])]   # e.g. the Cochrane train set
+for d in data_dirs[1:]:
+    extra = {r["review_id"]: r for r in read_jsonl(d / "reviews.jsonl")}
+    assert not set(extra) & set(reviews), f"review ids in {d} clash with earlier data"
+    reviews.update(extra)
 needed = {(m["review_id"], m["record_id"]) for m in train_meta + val_meta}
 records = {}
-for r in map(json.loads, open(DATA / "records.jsonl")):
-    if (r["review_id"], r["record_id"]) in needed:
-        records[r["review_id"], r["record_id"]] = r
+for d in data_dirs:
+    for r in map(json.loads, open(d / "records.jsonl")):
+        if (r["review_id"], r["record_id"]) in needed:
+            records[r["review_id"], r["record_id"]] = r
+assert len(records) == len(needed), f"{len(needed) - len(records)} train/val records not found in {data_dirs}"
 train_reviews, val_reviews = {m["review_id"] for m in train_meta}, {m["review_id"] for m in val_meta}
 assert not train_reviews & val_reviews, "review in train and val"
 assert not ({norm_title(reviews[r]["title"]) for r in train_reviews}
